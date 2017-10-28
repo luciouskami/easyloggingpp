@@ -1,7 +1,7 @@
 //
 //  Bismillah ar-Rahmaan ar-Raheem
 //
-//  Easylogging++ v9.94.1
+//  Easylogging++ v9.95.3
 //  Single-header only, cross-platform logging library for C++ applications
 //
 //  Copyright (c) 2017 muflihun.com
@@ -93,7 +93,7 @@
 #else
 #  define ELPP_OS_MAC 0
 #endif
-#if (defined(__FreeBSD__))
+#if (defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
 #  define ELPP_OS_FREEBSD 1
 #else
 #  define ELPP_OS_FREEBSD 0
@@ -103,8 +103,18 @@
 #else
 #  define ELPP_OS_SOLARIS 0
 #endif
+#if (defined(_AIX))
+#  define ELPP_OS_AIX 1
+#else
+#  define ELPP_OS_AIX 0
+#endif
+#if (defined(__NetBSD__))
+#  define ELPP_OS_NETBSD 1
+#else
+#  define ELPP_OS_NETBSD 0
+#endif
 // Unix
-#if ((ELPP_OS_LINUX || ELPP_OS_MAC || ELPP_OS_FREEBSD || ELPP_OS_SOLARIS) && (!ELPP_OS_WINDOWS))
+#if ((ELPP_OS_LINUX || ELPP_OS_MAC || ELPP_OS_FREEBSD || ELPP_OS_NETBSD || ELPP_OS_SOLARIS || ELPP_OS_AIX) && (!ELPP_OS_WINDOWS))
 #  define ELPP_OS_UNIX 1
 #else
 #  define ELPP_OS_UNIX 0
@@ -189,7 +199,7 @@ ELPP_INTERNAL_DEBUGGING_OUT_INFO << ELPP_INTERNAL_DEBUGGING_MSG(internalInfoStre
 #  define ELPP_INTERNAL_INFO(lvl, msg)
 #endif  // (defined(ELPP_DEBUG_INFO))
 #if (defined(ELPP_FEATURE_ALL)) || (defined(ELPP_FEATURE_CRASH_LOG))
-#  if (ELPP_COMPILER_GCC && !ELPP_MINGW)
+#  if (ELPP_COMPILER_GCC && !ELPP_MINGW && !ELPP_OS_ANDROID)
 #    define ELPP_STACKTRACE 1
 #  else
 #      if ELPP_COMPILER_MSVC
@@ -283,12 +293,16 @@ ELPP_INTERNAL_DEBUGGING_OUT_INFO << ELPP_INTERNAL_DEBUGGING_MSG(internalInfoStre
 #define ELPP_VARIADIC_TEMPLATES_SUPPORTED \
 (ELPP_COMPILER_GCC || ELPP_COMPILER_CLANG || ELPP_COMPILER_INTEL || (ELPP_COMPILER_MSVC && _MSC_VER >= 1800))
 // Logging Enable/Disable macros
-#define ELPP_LOGGING_ENABLED (!defined(ELPP_DISABLE_LOGS))
-#if (!defined(ELPP_DISABLE_DEBUG_LOGS) && (ELPP_LOGGING_ENABLED) && ((defined(_DEBUG)) || (!defined(NDEBUG))))
+#if defined(ELPP_DISABLE_LOGS)
+#define ELPP_LOGGING_ENABLED 0
+#else
+#define ELPP_LOGGING_ENABLED 1
+#endif
+#if (!defined(ELPP_DISABLE_DEBUG_LOGS) && (ELPP_LOGGING_ENABLED))
 #  define ELPP_DEBUG_LOG 1
 #else
 #  define ELPP_DEBUG_LOG 0
-#endif  // (!defined(ELPP_DISABLE_DEBUG_LOGS) && (ELPP_LOGGING_ENABLED) && ((defined(_DEBUG)) || (!defined(NDEBUG))))
+#endif  // (!defined(ELPP_DISABLE_DEBUG_LOGS) && (ELPP_LOGGING_ENABLED))
 #if (!defined(ELPP_DISABLE_INFO_LOGS) && (ELPP_LOGGING_ENABLED))
 #  define ELPP_INFO_LOG 1
 #else
@@ -438,6 +452,15 @@ ELPP_INTERNAL_DEBUGGING_OUT_INFO << ELPP_INTERNAL_DEBUGGING_MSG(internalInfoStre
 // For logging wxWidgets based classes & templates
 #   include <wx/vector.h>
 #endif  // defined(ELPP_WXWIDGETS_LOGGING)
+#if defined(ELPP_UTC_DATETIME)
+#   define elpptime_r gmtime_r
+#   define elpptime_s gmtime_s
+#   define elpptime   gmtime
+#else
+#   define elpptime_r localtime_r
+#   define elpptime_s localtime_s
+#   define elpptime   localtime
+#endif  // defined(ELPP_UTC_DATETIME)
 // Forward declarations
 namespace el {
 class Logger;
@@ -694,12 +717,14 @@ namespace consts {
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #endif
 // Level log values - These are values that are replaced in place of %level format specifier
-static const base::type::char_t* kInfoLevelLogValue     =   ELPP_LITERAL("INFO ");
+// Extra spaces after format specifiers are only for readability purposes in log files
+static const base::type::char_t* kInfoLevelLogValue     =   ELPP_LITERAL("INFO");
 static const base::type::char_t* kDebugLevelLogValue    =   ELPP_LITERAL("DEBUG");
-static const base::type::char_t* kWarningLevelLogValue  =   ELPP_LITERAL("WARN ");
+static const base::type::char_t* kWarningLevelLogValue  =   ELPP_LITERAL("WARNING");
 static const base::type::char_t* kErrorLevelLogValue    =   ELPP_LITERAL("ERROR");
 static const base::type::char_t* kFatalLevelLogValue    =   ELPP_LITERAL("FATAL");
-static const base::type::char_t* kVerboseLevelLogValue  =   ELPP_LITERAL("VER");
+static const base::type::char_t* kVerboseLevelLogValue  =
+  ELPP_LITERAL("VERBOSE"); // will become VERBOSE-x where x = verbose level
 static const base::type::char_t* kTraceLevelLogValue    =   ELPP_LITERAL("TRACE");
 static const base::type::char_t* kInfoLevelShortLogValue     =   ELPP_LITERAL("I");
 static const base::type::char_t* kDebugLevelShortLogValue    =   ELPP_LITERAL("D");
@@ -1452,8 +1477,8 @@ class Registry : public AbstractRegistry<T_Ptr, std::map<T_Key, T_Ptr*>> {
   void unregister(const T_Key& uniqKey) {
     T_Ptr* existing = get(uniqKey);
     if (existing != nullptr) {
-      base::utils::safeDelete(existing);
       this->list().erase(uniqKey);
+      base::utils::safeDelete(existing);
     }
   }
 
@@ -3305,6 +3330,7 @@ void Logger::log_(Level level, int vlevel, const T& log) {
                    base::DispatchAction::NormalLog, vlevel).construct(this, false) << log;
     } else {
       stream().str(ELPP_LITERAL(""));
+      releaseLock();
     }
   } else {
     base::Writer(level, "FILE", 0, "FUNCTION").construct(this, false) << log;
@@ -3312,23 +3338,23 @@ void Logger::log_(Level level, int vlevel, const T& log) {
 }
 template <typename T, typename... Args>
 inline void Logger::log(Level level, const char* s, const T& value, const Args&... args) {
-  base::threading::ScopedLock scopedLock(lock());
+  acquireLock(); // released in Writer!
   log_(level, 0, s, value, args...);
 }
 template <typename T>
 inline void Logger::log(Level level, const T& log) {
-  base::threading::ScopedLock scopedLock(lock());
+  acquireLock(); // released in Writer!
   log_(level, 0, log);
 }
 #  if ELPP_VERBOSE_LOG
 template <typename T, typename... Args>
 inline void Logger::verbose(int vlevel, const char* s, const T& value, const Args&... args) {
-  base::threading::ScopedLock scopedLock(lock());
+  acquireLock(); // released in Writer!
   log_(el::Level::Verbose, vlevel, s, value, args...);
 }
 template <typename T>
 inline void Logger::verbose(int vlevel, const T& log) {
-  base::threading::ScopedLock scopedLock(lock());
+  acquireLock(); // released in Writer!
   log_(el::Level::Verbose, vlevel, log);
 }
 #  else
